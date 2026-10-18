@@ -32,8 +32,8 @@ def main() -> None:
 
     print("Evaluating learned policy...")
     render_mode = "human" if args.human else "ansi"
-    evaluation_env = DinoEnv(render_mode=render_mode, renderer="pygame", max_steps=200)
-    evaluate_policy(evaluation_env, algorithm.q_table, max_policy, n_episodes=3, verbose=True)
+    evaluation_env = DinoEnv(render_mode=render_mode, renderer="pygame", max_steps=2000)
+    evaluate_policy(evaluation_env, algorithm.q_table, max_policy, n_episodes=10, verbose=True)
 
     evaluation_env.close()
 
