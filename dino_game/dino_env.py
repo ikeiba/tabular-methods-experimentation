@@ -65,23 +65,30 @@ class DinoEnv(gym.Env[int, int]):
 
     # Number of discrete bins per observation variable:
     # (dino_y, dino_vel_y, obs1_dist_x, obs1_y_min, obs1_width, obs2_gap, game_speed)
-    OBS_BINS = (3, 3, 6, 3, 3, 3, 3)
+    OBS_BINS = (3, 3, 10, 3, 3, 2, 1)
 
     def __init__(
         self,
         render_mode: str | None = None,
         renderer: str = "pygame",
         max_steps: int = 5000,
+        constant_speed: bool = False,
+        enable_fast_fall: bool = True,
     ):
         super().__init__()
 
         self.render_mode = render_mode
         self.renderer_name = renderer
         self.max_steps = max_steps
+        self.constant_speed = constant_speed
+        self.enable_fast_fall = enable_fast_fall
+
+        speed_bins = 1 if self.constant_speed else 3
+        self.obs_bins = (3, 3, 10, 3, 3, 2, speed_bins)
 
         self.action_space = spaces.Discrete(3)
-        self.num_states = int(np.prod(self.OBS_BINS))
-        self.observation_space = spaces.Discrete(self.num_states)  # 4,374 states
+        self.num_states = int(np.prod(self.obs_bins))
+        self.observation_space = spaces.Discrete(self.num_states)  # 1,620 states when constant_speed=True
 
         # Continuous internal state variables
         self.dino_y: float = 0.0
@@ -125,19 +132,27 @@ class DinoEnv(gym.Env[int, int]):
         # 2. dino_vel_y (3 bins: falling, steady/ground, rising)
         b_vel = 0 if dino_vel_y < -0.5 else (1 if dino_vel_y <= 0.5 else 2)
 
-        # 3. obs1_dist_x (6 bins: <0 overhead, and 5 positive proximity ranges)
+        # 3. obs1_dist_x (10 bins: <0 overhead, 8 intervals of 20px in [0, 160), >=160 safe)
         if obs1_dist_x < 0.0:
             b_dist = 0
-        elif obs1_dist_x < 45.0:
+        elif obs1_dist_x < 20.0:
             b_dist = 1
-        elif obs1_dist_x < 95.0:
+        elif obs1_dist_x < 40.0:
             b_dist = 2
-        elif obs1_dist_x < 155.0:
+        elif obs1_dist_x < 60.0:
             b_dist = 3
-        elif obs1_dist_x < 240.0:
+        elif obs1_dist_x < 80.0:
             b_dist = 4
-        else:
+        elif obs1_dist_x < 100.0:
             b_dist = 5
+        elif obs1_dist_x < 120.0:
+            b_dist = 6
+        elif obs1_dist_x < 140.0:
+            b_dist = 7
+        elif obs1_dist_x < 160.0:
+            b_dist = 8
+        else:
+            b_dist = 9
 
         # 4. obs1_y_min (3 bins: ground=0, mid=35, high=75)
         b_obs_y = 0 if obs1_y_min < 15.0 else (1 if obs1_y_min < 55.0 else 2)
@@ -145,25 +160,28 @@ class DinoEnv(gym.Env[int, int]):
         # 5. obs1_width (3 bins: narrow [25], medium [40-50], wide [75])
         b_width = 0 if obs1_width < 35.0 else (1 if obs1_width < 60.0 else 2)
 
-        # 6. obs2_gap (3 bins: close, medium, far)
-        b_gap = 0 if obs2_gap < 180.0 else (1 if obs2_gap < 320.0 else 2)
+        # 6. obs2_gap (2 bins: close < 250, far >= 250)
+        b_gap = 0 if obs2_gap < 250.0 else 1
 
-        # 7. game_speed (3 bins: slow, medium, fast)
-        b_speed = 0 if game_speed < 9.5 else (1 if game_speed < 12.5 else 2)
+        # 7. game_speed (1 bin if constant_speed else 3 bins)
+        if self.constant_speed:
+            b_speed = 0
+        else:
+            b_speed = 0 if game_speed < 9.5 else (1 if game_speed < 12.5 else 2)
 
         return (b_y, b_vel, b_dist, b_obs_y, b_width, b_gap, b_speed)
 
     def encode_state(self) -> int:
-        """Encode the current continuous state into a single integer in [0, 4373]."""
+        """Encode the current continuous state into a single integer in [0, num_states - 1]."""
         continuous_obs = self._get_continuous_obs()
         bins = self._discretize_obs(continuous_obs)
-        return int(np.ravel_multi_index(bins, self.OBS_BINS))
+        return int(np.ravel_multi_index(bins, self.obs_bins))
 
     def decode_state(self, state: int) -> tuple[int, ...]:
         """Decode an integer state back into its 7 discrete bin indices."""
         if not self.observation_space.contains(state):
             raise ValueError(f"state must be in {self.observation_space}")
-        return tuple(int(x) for x in np.unravel_index(int(state), self.OBS_BINS))
+        return tuple(int(x) for x in np.unravel_index(int(state), self.obs_bins))
 
     @property
     def current_dino_height(self) -> float:
@@ -196,21 +214,25 @@ class DinoEnv(gym.Env[int, int]):
         """Maintain at least 3 obstacles on the horizon at all times."""
         while len(self.obstacles) < 3:
             if not self.obstacles:
-                # First obstacle of the episode starts safely to the right
-                reference_x = 450.0
+                # First obstacle of the episode starts close to the dino (~200px ahead of front)
+                dino_front_x = self.DINO_X + self.DINO_WIDTH
+                first_x = dino_front_x + 200.0
+                self.obstacles.append(self._spawn_obstacle(first_x, use_exact_x=True))
             else:
                 last_obs = self.obstacles[-1]
                 reference_x = last_obs.x + last_obs.width
+                self.obstacles.append(self._spawn_obstacle(reference_x))
 
-            self.obstacles.append(self._spawn_obstacle(reference_x))
-
-    def _spawn_obstacle(self, reference_x: float) -> Obstacle:
+    def _spawn_obstacle(self, reference_x: float, use_exact_x: bool = False) -> Obstacle:
         """Sample a new random obstacle (cactus group or bird) at a safe distance."""
-        # Minimum safe gap scales dynamically with current game speed
-        min_gap = 130.0 + self.game_speed * 12.0
-        max_gap = min_gap + 220.0
-        gap = float(self.np_random.uniform(min_gap, max_gap))
-        new_x = reference_x + gap
+        if use_exact_x:
+            new_x = reference_x
+        else:
+            # Minimum safe gap scales dynamically with current game speed
+            min_gap = 130.0 + self.game_speed * 12.0
+            max_gap = min_gap + 220.0
+            gap = float(self.np_random.uniform(min_gap, max_gap))
+            new_x = reference_x + gap
 
         # 70% probability of ground cactus, 30% probability of flying bird
         if self.np_random.random() < 0.7:
@@ -259,8 +281,8 @@ class DinoEnv(gym.Env[int, int]):
         if self.dino_y > 0.0 or self.dino_vel_y > 0.0:
             self.dino_y += self.dino_vel_y
 
-            # Apply fast-fall multiplier if DUCK is selected while airborne
-            if self.dino_y > 0.0 and action == self.DUCK:
+            # Apply fast-fall multiplier only if explicitly enabled
+            if self.enable_fast_fall and self.dino_y > 0.0 and action == self.DUCK:
                 current_gravity = self.GRAVITY * self.FAST_FALL_MULTIPLIER
             else:
                 current_gravity = self.GRAVITY
@@ -287,7 +309,8 @@ class DinoEnv(gym.Env[int, int]):
 
         # 6. Update timers, progressive difficulty (speed), truncation, and reward
         self._elapsed_steps += 1
-        self.game_speed = min(self.MAX_SPEED, self.game_speed + self.SPEED_INCREMENT)
+        if not self.constant_speed:
+            self.game_speed = min(self.MAX_SPEED, self.game_speed + self.SPEED_INCREMENT)
 
         truncated = self._elapsed_steps >= self.max_steps and not terminated
         reward = self.calculate_reward(terminated)

@@ -6,7 +6,7 @@ import random
 import numpy as np
 
 from deustorl.common import EpsilonGreedyPolicy, evaluate_policy, max_policy
-from deustorl.qlearning import QLearning
+from deustorl.qlearning_fixed import QLearning
 from dino_game.dino_env import DinoEnv
 
 
@@ -32,7 +32,7 @@ def main() -> None:
 
     print("Evaluating learned policy...")
     render_mode = "human" if args.human else "ansi"
-    evaluation_env = DinoEnv(render_mode=render_mode, renderer="pygame", max_steps=2000)
+    evaluation_env = DinoEnv(render_mode=render_mode, renderer="pygame", max_steps=3000)
     evaluate_policy(evaluation_env, algorithm.q_table, max_policy, n_episodes=10, verbose=True)
 
     evaluation_env.close()
