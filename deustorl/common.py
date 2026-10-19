@@ -63,6 +63,25 @@ class EpsilonGreedyPolicy():
         else:
             return max_policy(q_values)
 
+class LinearDecayEpsilonGreedyPolicy():
+    def __init__(self, initial_epsilon: float = 1.0, min_epsilon: float = 0.01, decay_steps: int = 1_500_000):
+        self.epsilon = initial_epsilon
+        self.initial_epsilon = initial_epsilon
+        self.min_epsilon = min_epsilon
+        self.decay_steps = decay_steps
+        self.decay_step_size = (initial_epsilon - min_epsilon) / decay_steps
+
+    def __call__(self, q_values):
+        if random.random() < self.epsilon:
+            action = random.randint(0, len(q_values) - 1)
+        else:
+            action = max_policy(q_values)
+
+        if self.epsilon > self.min_epsilon:
+            self.epsilon = max(self.min_epsilon, self.epsilon - self.decay_step_size)
+
+        return action
+
 def weighted_policy(q_values):
     if sum(q_values) == 0:
         return random_policy(q_values)

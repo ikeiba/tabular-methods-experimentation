@@ -17,7 +17,12 @@ import time
 import optuna
 from optuna.samplers import TPESampler
 
-from deustorl.common import EpsilonGreedyPolicy, evaluate_policy, max_policy
+from deustorl.common import (
+    EpsilonGreedyPolicy,
+    LinearDecayEpsilonGreedyPolicy,
+    evaluate_policy,
+    max_policy,
+)
 from deustorl.expected_sarsa_fixed import ExpectedSarsa
 from deustorl.qlearning_fixed import QLearning
 from deustorl.sarsa_fixed import Sarsa
@@ -45,14 +50,21 @@ def make_objective(constant_speed: bool, n_steps: int, seed: int):
         lr_decay = trial.suggest_float("learning_rate_decay", 0.90, 1.0, step=0.01)
         lr_episodes_decay = trial.suggest_categorical("lr_episodes_decay", [100, 500, 1_000, 5_000])
         discount_rate = trial.suggest_float("discount_rate", 0.85, 0.999, step=0.01)
-        epsilon = trial.suggest_float("epsilon", 0.02, 0.30, step=0.02)
+        min_epsilon = trial.suggest_float("min_epsilon", 0.005, 0.05, step=0.005)
+        decay_ratio = trial.suggest_float("decay_ratio", 0.50, 0.85, step=0.05)
 
         env = DinoEnv(constant_speed=constant_speed)
         env.reset(seed=seed + trial.number)
 
-        algo = create_algorithm(algo_name, env)
-        policy = EpsilonGreedyPolicy(epsilon=epsilon)
+        eval_env = DinoEnv(constant_speed=constant_speed)
 
+        algo = create_algorithm(algo_name, env)
+        decay_steps = int(n_steps * decay_ratio)
+        policy = LinearDecayEpsilonGreedyPolicy(
+            initial_epsilon=1.0, min_epsilon=min_epsilon, decay_steps=decay_steps
+        )
+
+        eval_freq = max(10_000, n_steps // 10)  # Evaluate 10 times across training
         algo.learn(
             policy,
             n_steps=n_steps,
@@ -61,11 +73,15 @@ def make_objective(constant_speed: bool, n_steps: int, seed: int):
             lrdecay=lr_decay,
             n_episodes_decay=lr_episodes_decay,
             verbose=False,
+            eval_env=eval_env,
+            eval_freq=eval_freq,
+            eval_episodes=5,
         )
 
         avg_reward, avg_steps = evaluate_policy(
-            env, algo.q_table, max_policy, n_episodes=20, verbose=False
+            eval_env, algo.q_table, max_policy, n_episodes=20, verbose=False
         )
+        eval_env.close()
         env.close()
 
         trial.set_user_attr("avg_steps", avg_steps)
@@ -175,7 +191,7 @@ def print_comparison_summary(
         algo = best.params.get("algo_name", "N/A")
         lr = best.params.get("learning_rate", 0.0)
         gamma = best.params.get("discount_rate", 0.0)
-        eps = best.params.get("epsilon", 0.0)
+        eps = best.params.get("min_epsilon", best.params.get("epsilon", 0.0))
         steps = best.user_attrs.get("avg_steps", 0.0)
 
         print(

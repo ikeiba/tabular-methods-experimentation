@@ -58,17 +58,27 @@ class TensorboardLogger():
         self.episode_steps = deque([], maxlen=episode_period)
         self.total_steps = 0
         
-    def log(self, episode_reward, episode_steps):
-        self.total_steps += episode_steps
+    def log(self, episode_reward, episode_steps, step=None, epsilon=None):
+        if step is not None:
+            current_step = step
+        else:
+            self.total_steps += episode_steps
+            current_step = self.total_steps
 
         self.episode_rewards.append(episode_reward)
         self.episode_steps.append(episode_steps)
         average_rewards = mean(self.episode_rewards)
         average_steps = mean(self.episode_steps)
 
+        self.tb_writer.add_scalar("train/reward", average_rewards, current_step)
+        self.tb_writer.add_scalar("train/episode_len", average_steps, current_step) 
+        if epsilon is not None:
+            self.tb_writer.add_scalar("train/epsilon", epsilon, current_step)
 
-        self.tb_writer.add_scalar("train/reward", average_rewards, self.total_steps)
-        self.tb_writer.add_scalar("train/episode_len", average_steps, self.total_steps) 
+    def log_evaluation(self, eval_reward, eval_steps, step=None):
+        current_step = step if step is not None else self.total_steps
+        self.tb_writer.add_scalar("eval/reward", eval_reward, current_step)
+        self.tb_writer.add_scalar("eval/episode_len", eval_steps, current_step) 
 
 
 class DiscretizedObservationWrapper(gym.ObservationWrapper):
