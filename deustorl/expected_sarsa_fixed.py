@@ -21,6 +21,7 @@ class ExpectedSarsa:
         eval_env = None,
         eval_freq: int = 0,
         eval_episodes: int = 5,
+        tb_log_dir: str = "logs",
     ):
         obs, _ = self.env.reset()
         selected_action = policy(self.q_table[obs])
@@ -28,6 +29,7 @@ class ExpectedSarsa:
         tblogger = TensorboardLogger(
             "ExpectedSARSA_(dr=" + str(discount_rate) + "-lr=" + str(lr) + "-lrdecay=" + str(lrdecay) + "e" + str(n_episodes_decay) + ")",
             episode_period=tb_episode_period,
+            log_dir=tb_log_dir,
         )
 
         n_episodes = 0
@@ -99,4 +101,3 @@ class ExpectedSarsa:
                 result += v * non_greedy_action_probability
 
         return result
-   

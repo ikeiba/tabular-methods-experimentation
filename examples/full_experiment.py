@@ -76,6 +76,9 @@ def make_objective(constant_speed: bool, n_steps: int, seed: int):
             eval_env=eval_env,
             eval_freq=eval_freq,
             eval_episodes=5,
+            tb_log_dir=os.path.join(
+                "logs", "Full_experiment_optuna_trial", f"{trial.number}_{algo_name}"
+            ),
         )
 
         avg_reward, avg_steps = evaluate_policy(
@@ -85,7 +88,7 @@ def make_objective(constant_speed: bool, n_steps: int, seed: int):
         env.close()
 
         trial.set_user_attr("avg_steps", avg_steps)
-        trial.set_user_attr("num_states", env.observation_space.n)
+        trial.set_user_attr("num_states", int(env.observation_space.n))
         return float(avg_reward)
 
     return objective
@@ -232,7 +235,7 @@ def main() -> None:
     parser.add_argument(
         "--n-steps",
         type=int,
-        default=2_000_000,
+        default=10_000_000,
         help="Training steps per trial (default: 500,000)",
     )
     parser.add_argument(

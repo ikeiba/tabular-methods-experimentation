@@ -1,0 +1,19 @@
+{
+    "study_name": "dino_variable_speed",
+    "constant_speed": false,
+    "trial_number": 11,
+    "best_value": 2581.9,
+    "params": {
+        "algo_name": "qlearning",
+        "learning_rate": 0.3708812109066586,
+        "learning_rate_decay": 1.0,
+        "lr_episodes_decay": 5000,
+        "discount_rate": 0.94,
+        "min_epsilon": 0.005,
+        "decay_ratio": 0.65
+    },
+    "user_attrs": {
+        "avg_steps": 2682.9,
+        "num_states": 4860
+    }
+}
